@@ -1,0 +1,11 @@
+participants:
+  - name: "Emily Chen"
+    role: "Patient Experience Coordinator"
+    background: "5 years in healthcare administration, expertise in patient feedback systems"
+    is_facilitator: true
+
+tools:
+  - name: "Idea Board"
+    description: "Digital whiteboard for capturing and organizing ideas"
+  - name: "Vote-o-meter"
+    description: "Tool for quick polling and prioritization of ideas"
