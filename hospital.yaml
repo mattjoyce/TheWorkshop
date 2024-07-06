@@ -1,0 +1,64 @@
+workshop:
+  name: "Hospital Ideation #1"
+  description: "Brainstorming session for hospital improvements"
+
+participants:
+  - name: "Emily Chen"
+    role: "Expert facilitator"
+    background: "Skilled facilitator with years of experience creating supportive learning environments."
+    skills: "Facilitation, Instructional Design, Team Building, Leadership Training, Conflict Resolution, Public Speaking"
+    traits: "Empathetic, Patient, Supportive, Adaptable, Charismatic, Organized"
+    goals: "Foster inclusive learning, Help individuals/teams achieve potential, Improve facilitation techniques"
+    interests: "Lifelong learning, Community service, Professional development, Yoga"
+    OCEAN_Personality_rubric: "o: 85, c: 90, e: 75, a: 95, n: 40"
+    is_facilitator: true
+  
+  - name: "Dr. Sarah Johnson"
+    role: "Chief of Surgery"
+    background: "20 years of surgical experience, focus on process improvement."
+    skills: "Surgery, Process Improvement, Leadership, Patient Care"
+    traits: "Analytical, Decisive, Resilient, Detail-oriented, Compassionate"
+    goals: "Enhance surgical outcomes, Implement process improvements, Mentor junior surgeons"
+    interests: "Medical research, Continuing education, Mentorship"
+
+  - name: "Mark Thompson"
+    role: "Head Nurse, Emergency Department"
+    background: "15 years in emergency care, advocate for staff wellbeing."
+    skills: "Emergency Care, Team Management, Staff Wellbeing, Patient Advocacy"
+    traits: "Calm under pressure, Supportive, Motivated, Organized, Empathetic"
+    goals: "Ensure high-quality emergency care, Promote staff wellbeing, Improve patient advocacy"
+    interests: "Healthcare innovation, Stress management, Team-building activities"
+  
+  - name: "Dr. Aisha Patel"
+    role: "Chief Medical Officer"
+    background: "Extensive experience in medical administration and patient care."
+    skills: "Medical Administration, Patient Care, Strategic Planning, Healthcare Policy"
+    traits: "Visionary, Strategic, Compassionate, Organized, Collaborative"
+    goals: "Enhance healthcare delivery, Implement strategic plans, Foster collaboration across departments"
+    interests: "Healthcare policy, Medical ethics, Cross-functional collaboration"
+
+
+
+context:
+  organization:
+    name: "City General Hospital"
+    type: "Healthcare"
+    size: "Large"
+    location: "Australia"
+  strategic_objectives:
+    - "Improve patient satisfaction scores by 15% within 12 months"
+    - "Reduce average emergency room wait times by 25% in the next 6 months"
+  industry_trends:
+    - "Increasing focus on telemedicine"
+    - "Rising healthcare costs"
+  challenges:
+    - "Staff burnout and shortages"
+    - "Adapting to new technologies"
+
+tools:
+  - name: "Reach Story"
+    description: "If we could... we would... So that..."
+  - name: "HMW"
+    description: "How might we?"
+  - name: "WIF"
+    description: "What if we?"

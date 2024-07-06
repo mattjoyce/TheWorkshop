@@ -1,0 +1,89 @@
+workshop:
+  name: "Hospital Ideation #1"
+  description: "Brainstorming session to uncover opportunities to implement emerging technology."
+
+participants:
+  - name: "Emily Chen"
+    role: "Expert facilitator"
+    background: "Skilled facilitator with years of experience creating supportive learning environments."
+    skills: "Facilitation, Instructional Design, Team Building, Leadership Training, Conflict Resolution, Public Speaking"
+    traits: "Empathetic, Patient, Supportive, Adaptable, Charismatic, Organized"
+    goals: "Foster inclusive learning, Help individuals/teams achieve potential, Improve facilitation techniques"
+    interests: "Lifelong learning, Community service, Professional development, Yoga"
+    OCEAN_Personality_rubric: "o: 85, c: 90, e: 75, a: 95, n: 40"
+    is_facilitator: true
+  
+  - name: "Dr. Sarah Johnson"
+    role: "Chief of Surgery"
+    background: "20 years of surgical experience, focus on process improvement."
+    skills: "Surgery, Process Improvement, Leadership, Patient Care"
+    traits: "Analytical, Decisive, Resilient, Detail-oriented, Compassionate"
+    goals: "Enhance surgical outcomes, Implement process improvements, Mentor junior surgeons"
+    interests: "Medical research, Continuing education, Mentorship"
+
+  - name: "Mark Thompson"
+    role: "Head Nurse, Emergency Department"
+    background: "15 years in emergency care, advocate for staff wellbeing."
+    skills: "Emergency Care, Team Management, Staff Wellbeing, Patient Advocacy"
+    traits: "Calm under pressure, Supportive, Motivated, Organized, Empathetic"
+    goals: "Ensure high-quality emergency care, Promote staff wellbeing, Improve patient advocacy"
+    interests: "Healthcare innovation, Stress management, Team-building activities"
+  
+  - name: "Dr. Aisha Patel"
+    role: "Chief Medical Officer"
+    background: "Extensive experience in medical administration and patient care."
+    skills: "Medical Administration, Patient Care, Strategic Planning, Healthcare Policy"
+    traits: "Visionary, Strategic, Compassionate, Organized, Collaborative"
+    goals: "Enhance healthcare delivery, Implement strategic plans, Foster collaboration across departments"
+    interests: "Healthcare policy, Medical ethics, Cross-functional collaboration"
+
+  - name: "John Stevens"
+    role: "Progressive CIO"
+    background: "Visionary leader with a track record of driving digital transformation in large organisations."
+    skills: "Digital Transformation, Strategic Planning, Leadership, Innovation, Change Management"
+    traits: "Innovative, Strategic, Forward-thinking, Dynamic, Risk-taker"
+    goals: "Identify and implement x-factor projects, Drive digital innovation, Enhance organisational efficiency"
+    interests: "Emerging technologies, Digital transformation, Innovation ecosystems, Tech start-ups"
+  
+  - name: "Lisa Carter"
+    role: "Emerging Technology Manager"
+    background: "Level-headed manager with deep IT operational knowledge and a focus on integrating new technologies."
+    skills: "IT Operations, Technology Integration, Project Management, Team Leadership, Problem-solving"
+    traits: "Pragmatic, Analytical, Dependable, Strategic, Collaborative"
+    goals: "Integrate emerging technologies, Improve operational efficiency, Lead successful tech projects"
+    interests: "Tech trends, IT infrastructure, Process optimization, Team development"
+  
+  - name: "David Ramirez"
+    role: "Futurist Consultant"
+    background: "External consultant specializing in future trends and strategic foresight for businesses."
+    skills: "Futurism, Strategic Foresight, Trend Analysis, Scenario Planning, Innovation"
+    traits: "Visionary, Insightful, Creative, Analytical, Influential"
+    goals: "Provide strategic insights, Help organizations anticipate future trends, Drive innovation"
+    interests: "Future trends, Strategic foresight, Scenario planning, Disruptive technologies"
+
+
+
+
+context:
+  organization:
+    name: "City General Hospital"
+    type: "Healthcare"
+    size: "Large"
+    location: "Australia"
+  strategic_objectives:
+    - "Improve patient satisfaction scores by 15% within 12 months"
+    - "Reduce average emergency room wait times by 25% in the next 6 months"
+  industry_trends:
+    - "Increasing focus on telemedicine"
+    - "Rising healthcare costs"
+  challenges:
+    - "Staff burnout and shortages"
+    - "Adapting to new technologies"
+
+tools:
+  - name: "Reach Story"
+    description: "If we could... we would... So that..."
+  - name: "HMW"
+    description: "How might we?"
+  - name: "WIF"
+    description: "What if we?"

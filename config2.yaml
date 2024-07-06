@@ -5,7 +5,9 @@ participants:
     is_facilitator: true
 
 tools:
-  - name: "Idea Board"
-    description: "Digital whiteboard for capturing and organizing ideas"
-  - name: "Vote-o-meter"
-    description: "Tool for quick polling and prioritization of ideas"
+  - name: "Reach Story"
+    description: "If we could... we would... So that..."
+  - name: "HMW"
+    description: "How might we?"
+  - name: "WIF"
+    description: "What if we?"
