@@ -8,7 +8,7 @@ from typing import Any, Dict, List
 
 import jsonschema
 import yaml
-from ollama import Client
+from ollama import Client, show as llmshow
 from rich import print as rprint
 from rich.console import Console
 from rich.pretty import Pretty
@@ -16,6 +16,19 @@ from rich.prompt import Prompt
 
 from llm_interface import LLMInterface
 from participant import Participant
+from dataclasses import dataclass
+
+
+@dataclass
+class TranscriptEntry:
+    round: int
+    turn: int
+    participant_uuid: str
+    content: str
+
+    
+    def __str__(self):
+        return f"{self.round}:{self.turn}:{self.participant_uuid}:{self.content}"
 
 console = Console()
 
@@ -30,9 +43,9 @@ class WorkshopState(Enum):
 
 class Workshop:
     """ Main class for the workshop """
-    def __init__(self, llm_client):
+    def __init__(self, llm_client, context_length=4000):
         self.llm = llm_client
-        self.transcript_content: List[str] = []
+        self.transcript_content: List[TranscriptEntry] = []
         self.control_feedback: List[str] = []
         self.global_config: Dict[str, Any] = {}
         self.participants: List[Participant] = []
@@ -41,6 +54,24 @@ class Workshop:
         self.state: WorkshopState = WorkshopState.NOT_STARTED
         self.previous_participant: Participant = None
         self.current_turn: int = 0
+        self.tokens_used: int = 0
+        self.context_length : int = context_length
+        self.current_round : int= 0
+        
+    def get_transcript(self) -> List[str]:
+        """
+        Retrieves the full transcript as a list of strings.
+
+        Returns:
+            List[str]: The full transcript.
+        """
+        return [str(entry) for entry in self.transcript_content]
+    
+    def get_participant_by_uuid(self, uuid):
+        for participant in self.participants:
+            if participant.uuid == uuid:
+                return participant
+        return None
 
     def get_state(self) -> WorkshopState:
         """ Getter for the workshop state """
@@ -49,7 +80,7 @@ class Workshop:
     def save_state(self, filename: str = "workshop_state.json"):
         """ Save the state to JSON, in a restartable format """
         state = {
-            "transcript_content": self.transcript_content,
+            "transcript_content": [asdict(t) for t in self.transcript_content],
             "control_feedback": self.control_feedback,
             "global_config": self.global_config,
             "participants": [asdict(p) for p in self.participants],
@@ -60,6 +91,9 @@ class Workshop:
                 asdict(self.previous_participant) if self.previous_participant else None
             ),
             "current_turn": self.current_turn,
+            "tokens_used": self.tokens_used,
+            "context_length": self.context_length,
+            "current_round": self.current_round,
         }
         with open(filename, "w", encoding="utf-8") as f:
             json.dump(state, f, indent=2)
@@ -69,7 +103,7 @@ class Workshop:
         with open(filename, "r", encoding="utf-8") as f:
             state = json.load(f)
 
-        self.transcript_content = state["transcript_content"]
+        self.transcript_content = [TranscriptEntry(**t) for t in state["transcript_content"]]
         self.control_feedback = state["control_feedback"]
         self.global_config = state["global_config"]
         self.participants = [Participant(**p) for p in state["participants"]]
@@ -84,6 +118,9 @@ class Workshop:
             else None
         )
         self.current_turn = state["current_turn"]
+        self.tokens_used = state["tokens_used"]
+        self.context_length = state["context_length"]
+        self.current_round = state["current_round"]
 
     def extract_participants(self):
         """ Extract participants from the configuration and instantiate as objects """
@@ -163,20 +200,29 @@ class Workshop:
                 self.handle_say_command(args)
             elif cmd == "next":
                 self.handle_next_command(args)
-            elif cmd == "exit":
+            elif cmd == "end":
                 self.handle_endsession_command()
             elif cmd == "util":
                 self.handle_util_command(args)
             elif cmd == "backup":
-                self.handle_util_command(args)
+                self.handle_backup_command(args)
             elif cmd == "restore":
-                self.handle_util_command(args)
+                self.handle_restore_command(args)
+            elif cmd == "exit":
+                self.handle_exit_command()
             else:
                 self.control_feedback.append("Unknown command")
         else:
             self.control_feedback.append(
                 "Invalid command format. Commands should start with '/'"
             )
+
+    def handle_exit_command(self):
+        """ Exit the workshop, but do not end the session """
+        self.control_feedback.append("Exiting workshop.")
+        self.handle_backup_command(["workshop_state.json"])
+        sys.exit(0)
+        
 
     def handle_backup_command(self, args):
         """ Handle commands """
@@ -218,9 +264,7 @@ class Workshop:
                 schema = self.load_json_schema("schema.json")
                 self.validate_config(merged_config, schema)
                 self.global_config.update(merged_config)
-                self.transcript_content.append(
-                    f"Loaded configuration from '{filename}'."
-                )
+
                 self.control_feedback.append(
                     f"Configuration file '{filename}' loaded and merged."
                 )
@@ -262,7 +306,6 @@ class Workshop:
             if args
             else f"Let's begin our workshop session. {self.global_config['workshop']}"
         )
-        self.transcript_content.append(f"Workshop started with prompt: {prompt}")
         self.control_feedback.append(
             "Workshop started. Use /next to proceed with turns."
         )
@@ -277,7 +320,7 @@ class Workshop:
             prompt = f"""
             [CONTEXT]
                 You are participating in a workshop as facilitator, here are the details {self.global_config}
-                Here is the transcript so far : {self.transcript_content}
+                Here is the transcript so far : {self.get_transcript()}
               [/CONTEXT]
               [INSTRUCTIONS]
                 Say this '{content}' in your voice.
@@ -327,24 +370,25 @@ class Workshop:
 
     def pick_participant_by_name(self, name):
         """ Pick the next participant based on a name """
+        next_participant = None
         matching_participants = [
-            p for p in self.participants if p["name"].lower().startswith(name.lower())
+            p for p in self.participants if p.name.lower().startswith(name.lower())
         ]
         if matching_participants:
             next_participant = matching_participants[0]
         else:
             self.control_feedback.append(
-                f"No participant found whose name starts with '{args[0]}'"
+                f"No participant found whose name starts with '{name}'"
             )
 
-        return next_participant or None
+        return next_participant
 
     def llm_pick_participant(self):
         """ Pick the next participant based assessment of the conversation flow """
         prompt = f"""
         [CONTEXT]
           You are an AI assistant helping to manage a workshop. Here are the workshop details: {self.global_config}
-          Here is the transcript so far: {self.transcript_content}
+          Here is the transcript so far: {self.get_transcript()}
         [/CONTEXT]
         [INSTRUCTIONS]
           Based on the conversation flow and content, suggest which participant should speak next.
@@ -364,7 +408,7 @@ class Workshop:
         """
         suggestion = self.llm.get_response(
             prompt=prompt,
-            system_message=f"You analyse conversations and provide a single name.",
+            system_message=f"You analyse conversations and provide a single name.",get_tokens=False,
         )
         suggested_name = suggestion.split("Next speaker:")[-1].strip()
 
@@ -373,7 +417,6 @@ class Workshop:
 
     def handle_endsession_command(self):
         """ End the workshop """
-        self.transcript_content.append("Workshop session ended.")
         self.control_feedback.append("Workshop session ended.")
         self.state = WorkshopState.ENDING
 
@@ -397,15 +440,11 @@ class Workshop:
         """ Take the facilitator turn"""
         self.previous_participant = self.facilitator
         self.current_turn += 1
-        response = self.facilitator.generate_response(
-            self.llm, self.global_config, self.transcript_content
-        )
-
         prompt = f"""
         [CONTEXT]
           You are the workshop facilitator!
           Here are the workshop details: {self.global_config}
-          Here is the transcript so far: {self.transcript_content}
+          Here is the transcript so far: {self.get_transcript()}
         [/CONTEXT]
         [INSTRUCTIONS]
           Review the transcript and the goals.
@@ -413,13 +452,16 @@ class Workshop:
         [/INSTRUCTIONS]
         """
 
-        response = self.facilitator.generate_response(
-            self.llm, self.global_config, self.transcript_content, prompt=prompt
+        response, tokens = self.facilitator.generate_response(
+            self.llm, self.global_config, self.get_transcript(), prompt=prompt,
         )
-        self.transcript_content.append(f"{self.facilitator.name} (F): {response}")
+
+        entry=TranscriptEntry(round=self.current_round,turn=self.current_turn,participant_uuid=self.facilitator.uuid,content=response)
+        self.transcript_content.append(entry)
         self.control_feedback.append(
             f"{self.facilitator.name} (F) has spoken. Use /next to continue."
         )
+        self.tokens_used = tokens
 
     def take_participant_turn(self, participant=None):
         """ Take the participant turn """
@@ -430,27 +472,26 @@ class Workshop:
         self.current_turn += 1
         participant.update_stats(self.current_turn)
 
-        participant_response = participant.generate_response(
-            self.llm, self.global_config, self.transcript_content
-        )
+        participant_response, tokens = participant.generate_response(llm=self.llm, workshop_context=self.global_config, transcript=self.get_transcript(), prompt=None)
+        
+        entry=TranscriptEntry(round=self.current_round,turn=self.current_turn,participant_uuid=participant.uuid,content=participant_response)
+        self.transcript_content.append(entry)
 
-        self.transcript_content.append(f"{participant.name}: {participant_response}")
         self.control_feedback.append(
             f"{participant.name} has spoken. Use /next to continue."
         )
+        self.tokens_used = tokens
 
     def display_transcript(self):
         """ Display the transcript """
         console.clear()
         console.print("[bold green]Transcript:[/bold green]")
-        for line in self.transcript_content[-20:]:
-            parts = line.split(": ", 1)
-            if len(parts) == 2:
-                rprint(f"[bold blue]{parts[0]}[/bold blue]: {parts[1]}")
-            else:
-                console.print(line)
+        for entry in self.transcript_content[-20:]:
+            participant=self.get_participant_by_uuid(entry.participant_uuid)
+            rprint(f"[blue]{entry.round}.{entry.round}[/blue][bold blue]{entry.participant_uuid}[/bold blue]: {entry.content}")
+
         with open("latest_transcript.txt", "w", encoding="utf-8") as f:
-            f.write("\n".join(self.transcript_content))
+            f.write("\n".join(self.get_transcript()))
 
     def display_control_feedback(self):
         """ Display the control feedback """
@@ -476,7 +517,7 @@ class Workshop:
                 Discard irrelevant information.
               [/GUIDANCE]
               [CONTENT]
-                {self.transcript_content}
+                {self.get_transcript()}
               [/CONTENT]
               """
             response = self.llm.get_response(
@@ -492,11 +533,13 @@ class Workshop:
 
 def main(arg):
     """ main function to run the workshop """
+    model="phi3:latest"
+
     llm = LLMInterface(
-        client=Client(host="http://localhost:11434"), model="mistral:latest"
+        client=Client(host="http://localhost:11434"), model=model
     )
-    workshop = Workshop(llm_client=llm)
-    rprint(workshop.get_state())
+    workshop = Workshop(llm_client=llm, context_length=32000)
+
 
     if arg and arg.endswith(".json"):
         workshop.load_state(arg)
@@ -512,6 +555,7 @@ def main(arg):
             workshop.display_control_feedback()
             command = Prompt.ask("\n>>>")
             workshop.handle_command(command)
+            workshop.save_state("final_state.json")  # Save final state when exiting
         except KeyboardInterrupt:
             workshop.handle_command("/exit")
 
