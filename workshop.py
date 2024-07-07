@@ -3,6 +3,7 @@ import os
 import random
 from pathlib import Path
 from typing import Any, Dict
+import sys
 
 import jsonschema
 import yaml
@@ -11,38 +12,67 @@ from rich import print as rprint
 from rich.console import Console
 from rich.pretty import Pretty
 from rich.prompt import Prompt
-
+from participant import Participant
+from llm_interface import LLMInterface
+from workshop_state import WorkshopState, save_state, load_state
 console = Console()
 
-
 class Workshop:
-    def __init__(self, llm_client, llm_model):
-        self.transcript_content = []
-        self.control_feedback = []
-        self.global_config = {}
-        self.participants = []
-        self.facilitator = None
-        self.current_participant_index = -1
-        self.workshop_started = False
-        self.client = llm_client
-        self.model = llm_model
-        self.previous_participant = None
+    def __init__(self, llm_client, state: WorkshopState = None):
+        self.llm = llm_client
+        if state:
+            self.load_state(state)
+        else:
+            self.state = WorkshopState()
 
-    # ... (other methods remain the same)
+    def load_state(self, state: WorkshopState):
+        self.state = state
+        self.transcript_content = state.transcript_content
+        self.control_feedback = state.control_feedback
+        self.global_config = state.global_config
+        self.participants = state.participants
+        self.facilitator = state.facilitator
+        self.current_participant_index = state.current_participant_index
+        self.workshop_started = state.workshop_started
+        self.previous_participant = state.previous_participant
+        self.current_turn = state.current_turn
+
+    def save_current_state(self, filename: str = 'workshop_state.json'):
+        self.state.transcript_content = self.transcript_content
+        self.state.control_feedback = self.control_feedback
+        self.state.global_config = self.global_config
+        self.state.participants = self.participants
+        self.state.facilitator = self.facilitator
+        self.state.current_participant_index = self.current_participant_index
+        self.state.workshop_started = self.workshop_started
+        self.state.previous_participant = self.previous_participant
+        self.state.current_turn = self.current_turn
+        save_state(self.state, filename)
+
+
 
     def extract_participants(self):
         if "participants" in self.global_config:
-            for participant in self.global_config["participants"]:
-                if participant.get("is_facilitator", False):
+            for p_data in self.global_config["participants"]:
+                participant = Participant(
+                    name=p_data['name'],
+                    role=p_data['role'],
+                    background=p_data.get('background', ''),
+                    is_facilitator=p_data.get('is_facilitator', False)
+                )
+                if participant.is_facilitator:
                     self.facilitator = participant
                 else:
                     self.participants.append(participant)
+        
         if not self.facilitator:
             self.control_feedback.append(
                 "Warning: No facilitator defined. First participant will be set as facilitator."
             )
             if self.participants:
                 self.facilitator = self.participants.pop(0)
+                self.facilitator.is_facilitator = True
+        
         random.shuffle(self.participants)
 
     def load_yaml(self, file_path: str) -> Dict[str, Any]:
@@ -83,9 +113,7 @@ class Workshop:
             cmd = parts[0]
             args = parts[1:]
 
-            if cmd == "new":
-                self.handle_new_command(args)
-            elif cmd == "load":
+            if cmd == "load":
                 self.handle_load_command(args)
             elif cmd == "list":
                 self.handle_list_command(args)
@@ -111,41 +139,6 @@ class Workshop:
             self.control_feedback.append(
                 "Invalid command format. Commands should start with '/'"
             )
-
-    def handle_new_command(self, args):
-        if len(args) == 1:
-            workshop_name = args[0]
-
-            # Create the workshop element in the global_config
-            self.global_config["workshop"] = {"name": workshop_name}
-
-            # Add to transcript and control feedback
-            self.transcript_content.append(f"New workshop '{workshop_name}' started.")
-            self.control_feedback.append(f"Workshop '{workshop_name}' created.")
-
-            # Optionally, we can prompt for a description
-            description = Prompt.ask("Enter a description for the workshop (optional)")
-            if description:
-                self.global_config["workshop"]["description"] = description
-                self.control_feedback.append("Workshop description added.")
-
-            # Validate the new configuration against the schema
-            try:
-                schema = self.load_json_schema("schema.json")
-                self.validate_config(self.global_config, schema)
-                self.control_feedback.append(
-                    "Workshop configuration validated successfully."
-                )
-            except jsonschema.exceptions.ValidationError as ve:
-                self.control_feedback.append(
-                    f"Warning: New workshop configuration does not fully comply with the schema: {ve}"
-                )
-            except Exception as e:
-                self.control_feedback.append(
-                    f"Error validating workshop configuration: {e}"
-                )
-        else:
-            self.control_feedback.append("Usage: /new [workshop name]")
 
     def handle_load_command(self, args):
         if len(args) == 1:
@@ -296,16 +289,21 @@ class Workshop:
           - Who was asked a direct question
           - Who might have relevant expertise for the current topic
           - Who hasn't spoken in a while
-          Provide your suggestion in the format: "Next speaker: [Participant Name]"
         [/INSTRUCTIONS]
+        [CONSTRAINTS]
+          - Suggested participant must be a participant in the workshop
+          - Suggested participant must not be the same as the previous speaker
+          - Suggested participant must not be the facilitator
+          - Suggested participant must not be the same as the current speaker
+          - Only Respond in the format: 'Next speaker: Participant Name'
+          - Any other response format will fail.
+        [/CONSTRAINTS]
         """
-        suggestion = self.get_responsefrom_llm(
-            prompt, {"name": "AI Assistant", "role": "Workshop Manager"}
-        )
+        suggestion = self.llm.get_response(prompt=prompt, system_message=f"You analyse conversations and provide a single name.")
         suggested_name = suggestion.split("Next speaker:")[-1].strip()
 
         matching_participants = [
-            p for p in self.participants if p["name"].lower() == suggested_name.lower()
+            p for p in self.participants if p.name.lower() == suggested_name.lower()
         ]
         if matching_participants:
             self.take_participant_turn(matching_participants[0])
@@ -326,80 +324,39 @@ class Workshop:
             f.write("\n".join(self.transcript_content))
         os.system(f"notepad {transcript_file}")
 
-    def get_responsefrom_llm(self, prompt, participant):
-        response = self.client.chat(
-            model=self.model,
-            keep_alive=600,
-            options={"temperature": 0.7, "num_gpu": -1},
-            messages=[
-                {
-                    "role": "system",
-                    "content": f"You're persona is {participant}.",
-                    "role": "user",
-                    "content": prompt,
-                },
-            ],
-        )
+    # def get_responsefrom_llm(self, prompt, participant):
+    #     response = self.llm_client.get_response(prompt=prompt, system_message=f"You're persona is {participant}.")
 
-        # save prompt and reponse to last_response.txt, overwrite each time
-        with open("last_response.txt", "w") as f:
-            f.write(f"Prompt: {prompt}\nResponse: {response['message']['content']}")
+    #     # save prompt and reponse to last_response.txt, overwrite each time
+    #     with open("last_response.txt", "w") as f:
+    #         f.write(f"Prompt: {prompt}\nResponse: {response['message']['content']}")
 
-        return response["message"]["content"]
+    #     return response["message"]["content"]
 
     def take_facilitator_turn(self, prompt):
-        response = self.get_responsefrom_llm(prompt, self.facilitator)
-        self.transcript_content.append(f"{self.facilitator['name']}: {response}")
+        response = self.llm.get_response(prompt=prompt, system_message=f"You're persona is {self.facilitator}.")
+        self.transcript_content.append(f"{self.facilitator.name}: {response}")
         self.control_feedback.append(
-            f"{self.facilitator['name']} has spoken. Use /next to continue."
+            f"Facilitator {self.facilitator.name} has spoken. Use /next to continue."
         )
         self.display_transcript()
         self.display_control_feedback()
 
+
     def take_participant_turn(self, participant=None):
         if participant is None:
-            # Random selection logic moved to handle_next_command
             return
 
         self.previous_participant = participant
+        self.current_turn += 1
+        participant.update_stats(self.current_turn)
+        
+        participant_response = participant.generate_response(self.llm, self.global_config, self.transcript_content)
 
-        prompt = f"""
-          [CONTEXT]
-            Your name is {participant['name']}
-            You are participating in this workshop, {self.global_config}
-            Here is the transcript so far : {self.transcript_content}
-          [/CONTEXT]
-          [INSTRUCTIONS]
-            It's your turn to contribute, ask a question, challenge something, or make a comment.
-          [/INSTRUCTIONS]
-          [GUIDANCE]
-            Be concise, be clear, and be authentic to your persona.
-          [/GUIDANCE]
-          """
-
-        response = self.client.chat(
-            model=self.model,
-            keep_alive=600,
-            options={"temperature": 0.7, "num_gpu": -1},
-            messages=[
-                {
-                    "role": "system",
-                    "content": f"You're persona is a willing participant in a workshop.",
-                    "role": "user",
-                    "content": prompt,
-                },
-            ],
-        )
-        participant_response = response["message"]["content"]
-
-        self.transcript_content.append(f"{participant['name']}: {participant_response}")
+        self.transcript_content.append(f"{participant.name}: {participant_response}")
         self.control_feedback.append(
-            f"{participant['name']} has spoken. Use /next to continue."
+            f"{participant.name} has spoken. Use /next to continue."
         )
-        with open("last_response.txt", "w") as f:
-            f.write(
-                f"Participant: {participant['name']}\nPrompt: {prompt}\nResponse: {participant_response}"
-            )
         self.display_transcript()
         self.display_control_feedback()
 
@@ -440,19 +397,7 @@ class Workshop:
                 {self.transcript_content}
               [/CONTENT]
               """
-            response = self.client.chat(
-                model="phi3:latest",
-                keep_alive=600,
-                options={"temperature": 0.2, "num_gpu": -1},
-                messages=[
-                    {
-                        "role": "system",
-                        "content": f"You are a summarizer, you compress text.",
-                        "role": "user",
-                        "content": prompt,
-                    },
-                ],
-            )
+            response = self.llm_client.get_response(prompt=prompt, system_message=f"You are a summarizer, you compress text.")
             summary = response["message"]["content"]
             with open("summary.txt", "w") as f:
                 f.write(summary)
@@ -460,12 +405,14 @@ class Workshop:
             self.control_feedback.append(f"Unknown util action: {action}")
 
 
-def main():
-
+def main(arg):
+    LLM = LLMInterface(client=Client(host="http://localhost:11434"), model="mistral:latest")
     workshop = Workshop(
-        llm_client=Client(host="http://localhost:11434"), llm_model="mistral:latest"
+        llm_client=LLM
     )
-
+    if len(sys.argv) > 1:
+        rprint(f"Loading configuration file {sys.argv[0]}")
+        workshop.handle_load_command([sys.argv[1]])
     while True:
         try:
             workshop.display_transcript()
@@ -479,4 +426,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) > 1:
+        main(sys.argv[1])
