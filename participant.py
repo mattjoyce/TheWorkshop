@@ -39,8 +39,8 @@ class Participant:
     def turns_since_last_contribution(self, current_turn: int) -> int:
         return current_turn - self.last_spoke_turn
 
-    def generate_response(self, llm: LLMInterface, workshop_context: dict, transcript: list):
-        prompt = f"""
+    def generate_response(self, llm: LLMInterface, workshop_context: dict, transcript: list, prompt:str):
+        default_prompt = f"""
           [CONTEXT]
             {self.get_context_for_llm()}
             You are participating in this workshop, {workshop_context}
@@ -53,9 +53,12 @@ class Participant:
             Be concise, be clear, and be authentic to your persona.
           [/GUIDANCE]
           """
-        participant_response = llm.get_response(prompt, f"You're persona is {self.name}, a willing participant in a workshop.")
+        if prompt is None:
+            prompt = default_prompt
+
+        response = llm.get_response(prompt, system_message=f"You're persona is {self.name}, a willing participant in a workshop.")
         with open(f"state/participant_{self.name}_reponse.txt", "a") as f:
           f.write(
-              f"Participant: {self.name}\nPrompt: {prompt}\nResponse: {participant_response}"
+              f"Participant: {self.name}\nPrompt: {prompt}\nResponse: {response}"
           )
-        return participant_response
+        return response

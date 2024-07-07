@@ -1,9 +1,10 @@
+""" Module to simulate a workshop session with large language models """
 import json
-import os
 import random
-from pathlib import Path
-from typing import Any, Dict
 import sys
+from dataclasses import asdict
+from enum import Enum
+from typing import Any, Dict, List
 
 import jsonschema
 import yaml
@@ -12,59 +13,93 @@ from rich import print as rprint
 from rich.console import Console
 from rich.pretty import Pretty
 from rich.prompt import Prompt
-from participant import Participant
+
 from llm_interface import LLMInterface
-from workshop_state import WorkshopState, save_state, load_state
+from participant import Participant
+
 console = Console()
 
+
+
+class WorkshopState(Enum):
+    """ Enum for the workshop state """
+    NOT_STARTED = 0
+    STARTED = 1
+    ENDING = 2
+
+
 class Workshop:
-    def __init__(self, llm_client, state: WorkshopState = None):
+    """ Main class for the workshop """
+    def __init__(self, llm_client):
         self.llm = llm_client
-        if state:
-            self.load_state(state)
-        else:
-            self.state = WorkshopState()
+        self.transcript_content: List[str] = []
+        self.control_feedback: List[str] = []
+        self.global_config: Dict[str, Any] = {}
+        self.participants: List[Participant] = []
+        self.facilitator: Participant = None
+        self.current_participant_index: int = -1
+        self.state: WorkshopState = WorkshopState.NOT_STARTED
+        self.previous_participant: Participant = None
+        self.current_turn: int = 0
 
-    def load_state(self, state: WorkshopState):
-        self.state = state
-        self.transcript_content = state.transcript_content
-        self.control_feedback = state.control_feedback
-        self.global_config = state.global_config
-        self.participants = state.participants
-        self.facilitator = state.facilitator
-        self.current_participant_index = state.current_participant_index
-        self.workshop_started = state.workshop_started
-        self.previous_participant = state.previous_participant
-        self.current_turn = state.current_turn
+    def get_state(self) -> WorkshopState:
+        """ Getter for the workshop state """
+        return self.state
 
-    def save_current_state(self, filename: str = 'workshop_state.json'):
-        self.state.transcript_content = self.transcript_content
-        self.state.control_feedback = self.control_feedback
-        self.state.global_config = self.global_config
-        self.state.participants = self.participants
-        self.state.facilitator = self.facilitator
-        self.state.current_participant_index = self.current_participant_index
-        self.state.workshop_started = self.workshop_started
-        self.state.previous_participant = self.previous_participant
-        self.state.current_turn = self.current_turn
-        save_state(self.state, filename)
+    def save_state(self, filename: str = "workshop_state.json"):
+        """ Save the state to JSON, in a restartable format """
+        state = {
+            "transcript_content": self.transcript_content,
+            "control_feedback": self.control_feedback,
+            "global_config": self.global_config,
+            "participants": [asdict(p) for p in self.participants],
+            "facilitator": asdict(self.facilitator) if self.facilitator else None,
+            "current_participant_index": self.current_participant_index,
+            "state": self.state.value,
+            "previous_participant": (
+                asdict(self.previous_participant) if self.previous_participant else None
+            ),
+            "current_turn": self.current_turn,
+        }
+        with open(filename, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
 
+    def load_state(self, filename: str = "workshop_state.json"):
+        """ Load the state from JSON """
+        with open(filename, "r", encoding="utf-8") as f:
+            state = json.load(f)
 
+        self.transcript_content = state["transcript_content"]
+        self.control_feedback = state["control_feedback"]
+        self.global_config = state["global_config"]
+        self.participants = [Participant(**p) for p in state["participants"]]
+        self.facilitator = (
+            Participant(**state["facilitator"]) if state["facilitator"] else None
+        )
+        self.current_participant_index = state["current_participant_index"]
+        self.state = WorkshopState(state["state"])
+        self.previous_participant = (
+            Participant(**state["previous_participant"])
+            if state["previous_participant"]
+            else None
+        )
+        self.current_turn = state["current_turn"]
 
     def extract_participants(self):
+        """ Extract participants from the configuration and instantiate as objects """
         if "participants" in self.global_config:
             for p_data in self.global_config["participants"]:
                 participant = Participant(
-                    name=p_data['name'],
-                    role=p_data['role'],
-                    background=p_data.get('background', ''),
-                    is_facilitator=p_data.get('is_facilitator', False)
+                    name=p_data["name"],
+                    role=p_data["role"],
+                    background=p_data.get("background", ""),
+                    is_facilitator=p_data.get("is_facilitator", False),
                 )
                 if participant.is_facilitator:
                     self.facilitator = participant
                 else:
                     self.participants.append(participant)
-        
+
         if not self.facilitator:
             self.control_feedback.append(
                 "Warning: No facilitator defined. First participant will be set as facilitator."
@@ -72,16 +107,18 @@ class Workshop:
             if self.participants:
                 self.facilitator = self.participants.pop(0)
                 self.facilitator.is_facilitator = True
-        
+
         random.shuffle(self.participants)
 
     def load_yaml(self, file_path: str) -> Dict[str, Any]:
-        with open(file_path, "r") as file:
+        """ Load YAML config file to build a full config """
+        with open(file_path, "r", encoding="utf-8") as file:
             return yaml.safe_load(file)
 
     def load_json_schema(self, file_path: str) -> Dict[str, Any]:
+        """ Load JSON schema file to validate the config """
         try:
-            with open(file_path, "r") as file:
+            with open(file_path, "r", encoding="utf-8") as file:
                 return json.load(file)
         except FileNotFoundError:
             raise Exception(f"File not found: {file_path}")
@@ -89,9 +126,11 @@ class Workshop:
             raise Exception(f"Invalid JSON format in {file_path}: {e}")
 
     def validate_config(self, config: Dict[str, Any], schema: Dict[str, Any]):
+        """ Validate the config against the schema """
         jsonschema.validate(instance=config, schema=schema)
 
     def merge_configs(self, configs: list[Dict[str, Any]]) -> Dict[str, Any]:
+        """ Merge multiple configs into one """
         merged_config = {}
         for config in configs:
             for key, value in config.items():
@@ -108,6 +147,7 @@ class Workshop:
         return merged_config
 
     def handle_command(self, command):
+        """ main command handler """
         if command.startswith("/"):
             parts = command[1:].split()
             cmd = parts[0]
@@ -115,10 +155,6 @@ class Workshop:
 
             if cmd == "load":
                 self.handle_load_command(args)
-            elif cmd == "list":
-                self.handle_list_command(args)
-            elif cmd == "remove":
-                self.handle_remove_command(args)
             elif cmd == "show":
                 self.handle_show_command(args)
             elif cmd == "start":
@@ -127,11 +163,13 @@ class Workshop:
                 self.handle_say_command(args)
             elif cmd == "next":
                 self.handle_next_command(args)
-            elif cmd == "endsession":
+            elif cmd == "exit":
                 self.handle_endsession_command()
-            elif cmd == "view_transcript":
-                self.handle_view_transcript_command()
             elif cmd == "util":
+                self.handle_util_command(args)
+            elif cmd == "backup":
+                self.handle_util_command(args)
+            elif cmd == "restore":
                 self.handle_util_command(args)
             else:
                 self.control_feedback.append("Unknown command")
@@ -140,7 +178,38 @@ class Workshop:
                 "Invalid command format. Commands should start with '/'"
             )
 
+    def handle_backup_command(self, args):
+        """ Handle commands """
+        if len(args) == 1:
+            filename = args[0]
+            try:
+                self.save_state(filename)
+                self.control_feedback.append(f"Workshop state saved to '{filename}'.")
+            except Exception as e:
+                self.control_feedback.append(
+                    f"Error saving workshop state to '{filename}': {e}"
+                )
+        else:
+            self.control_feedback.append("Usage: /save [filename]")
+
+    def handle_restore_command(self, args):
+        """ Handle commands """
+        if len(args) == 1:
+            filename = args[0]
+            try:
+                self.load_state(filename)
+                self.control_feedback.append(
+                    f"Workshop state loaded from '{filename}'."
+                )
+            except Exception as e:
+                self.control_feedback.append(
+                    f"Error loading workshop state from '{filename}': {e}"
+                )
+        else:
+            self.control_feedback.append("Usage: /load [filename]")
+
     def handle_load_command(self, args):
+        """ Handle commands """
         if len(args) == 1:
             filename = args[0]
             try:
@@ -162,33 +231,21 @@ class Workshop:
         else:
             self.control_feedback.append("Usage: /load [filename]")
 
-    def handle_list_command(self, args):
-        self.control_feedback.append("Listing configuration files...")
-        # Implement listing logic here
-
-    def handle_remove_command(self, args):
-        if len(args) == 1:
-            file_number = args[0]
-            self.control_feedback.append(
-                f"Removing configuration file #{file_number}..."
-            )
-            # Implement remove logic here
-        else:
-            self.control_feedback.append("Usage: /remove [file number]")
-
     def handle_show_command(self, args):
+        """ Handle commands """
         self.control_feedback.append("Current configuration:")
         pretty_config = Pretty(self.global_config)
         self.control_feedback.append(pretty_config)
 
     def handle_start_command(self, args):
-        if self.workshop_started:
+        """ Start the workshop """
+        if self.state == WorkshopState.STARTED:
             self.control_feedback.append("Workshop is already in progress.")
             return
 
         if not self.global_config.get("workshop", {}).get("name"):
             self.control_feedback.append(
-                "Please create a workshop using /new before starting."
+                "Please create a workshop via loading config before starting."
             )
             return
 
@@ -209,10 +266,11 @@ class Workshop:
         self.control_feedback.append(
             "Workshop started. Use /next to proceed with turns."
         )
-        self.workshop_started = True
+        self.state = WorkshopState.STARTED
         self.take_facilitator_turn(prompt)
 
     def handle_say_command(self, args):
+        """ Say something to the participants as facilitor """
         if len(args) >= 1:
             content = " ".join(args)
 
@@ -233,18 +291,21 @@ class Workshop:
             self.control_feedback.append("Usage: /say [content]")
 
     def handle_next_command(self, args=[]):
-        if not self.workshop_started:
+        """ main action to start new truns """
+        if not self.state == WorkshopState.STARTED:
             self.control_feedback.append(
                 "Workshop hasn't started. Use /start to begin the workshop."
             )
             return
 
-        turns = 1
+        # Default behavior: take 1 turn or auto run a few turns
+        turn_to_take = 1
         if args and args[0].isdigit():
-            turns = int(args[0])
+            turn_to_take = int(args[0])
             args = args[1:]  # Remove the number from args
 
-        for _ in range(turns):
+        next_participant = None
+        for _ in range(turn_to_take):
             if not args:
                 # Default behavior: pick random but not last
                 available_participants = [
@@ -252,32 +313,34 @@ class Workshop:
                 ]
                 if not available_participants:
                     available_participants = self.participants
-                participant = random.choice(available_participants)
-                self.take_participant_turn(participant)
+                next_participant = random.choice(available_participants)
             elif args[0] == "?":
                 # Use LLM to determine who should be next
-                self.take_llm_suggested_turn()
+                next_participant = self.llm_pick_participant()
             else:
+                # nominate
                 # Try to find a participant that starts with the given string
-                name_start = args[0].lower()
-                matching_participants = [
-                    p
-                    for p in self.participants
-                    if p["name"].lower().startswith(name_start)
-                ]
-                if matching_participants:
-                    self.take_participant_turn(matching_participants[0])
-                else:
-                    self.control_feedback.append(
-                        f"No participant found whose name starts with '{args[0]}'"
-                    )
-                    break  # Stop the loop if no matching participant is found
+                next_participant = self.pick_participant_by_name(args[0])
 
-            # Optional: Add a small delay between turns
-            # import time
-            # time.sleep(1)
+            if next_participant:
+                self.take_participant_turn(next_participant)
 
-    def take_llm_suggested_turn(self):
+    def pick_participant_by_name(self, name):
+        """ Pick the next participant based on a name """
+        matching_participants = [
+            p for p in self.participants if p["name"].lower().startswith(name.lower())
+        ]
+        if matching_participants:
+            next_participant = matching_participants[0]
+        else:
+            self.control_feedback.append(
+                f"No participant found whose name starts with '{args[0]}'"
+            )
+
+        return next_participant or None
+
+    def llm_pick_participant(self):
+        """ Pick the next participant based assessment of the conversation flow """
         prompt = f"""
         [CONTEXT]
           You are an AI assistant helping to manage a workshop. Here are the workshop details: {self.global_config}
@@ -299,30 +362,27 @@ class Workshop:
           - Any other response format will fail.
         [/CONSTRAINTS]
         """
-        suggestion = self.llm.get_response(prompt=prompt, system_message=f"You analyse conversations and provide a single name.")
+        suggestion = self.llm.get_response(
+            prompt=prompt,
+            system_message=f"You analyse conversations and provide a single name.",
+        )
         suggested_name = suggestion.split("Next speaker:")[-1].strip()
 
-        matching_participants = [
-            p for p in self.participants if p.name.lower() == suggested_name.lower()
-        ]
-        if matching_participants:
-            self.take_participant_turn(matching_participants[0])
-        else:
-            self.control_feedback.append(
-                f"Suggested participant '{suggested_name}' not found. Choosing randomly."
-            )
-            self.handle_next_command()  # This will choose randomly
+        next_participant = self.pick_participant_by_name(suggested_name)
+        return next_participant or None
 
     def handle_endsession_command(self):
+        """ End the workshop """
         self.transcript_content.append("Workshop session ended.")
         self.control_feedback.append("Workshop session ended.")
+        self.state = WorkshopState.ENDING
 
-    def handle_view_transcript_command(self):
-        self.control_feedback.append("Opening full transcript...")
-        transcript_file = Path("transcript.txt")
-        with transcript_file.open("w") as f:
-            f.write("\n".join(self.transcript_content))
-        os.system(f"notepad {transcript_file}")
+    # def handle_view_transcript_command(self):
+    #     self.control_feedback.append("Opening full transcript...")
+    #     transcript_file = Path("transcript.txt")
+    #     with transcript_file.open("w") as f:
+    #         f.write("\n".join(self.transcript_content))
+    #     os.system(f"notepad {transcript_file}")
 
     # def get_responsefrom_llm(self, prompt, participant):
     #     response = self.llm_client.get_response(prompt=prompt, system_message=f"You're persona is {participant}.")
@@ -334,33 +394,53 @@ class Workshop:
     #     return response["message"]["content"]
 
     def take_facilitator_turn(self, prompt):
-        response = self.llm.get_response(prompt=prompt, system_message=f"You're persona is {self.facilitator}.")
-        self.transcript_content.append(f"{self.facilitator.name}: {response}")
-        self.control_feedback.append(
-            f"Facilitator {self.facilitator.name} has spoken. Use /next to continue."
+        """ Take the facilitator turn"""
+        self.previous_participant = self.facilitator
+        self.current_turn += 1
+        response = self.facilitator.generate_response(
+            self.llm, self.global_config, self.transcript_content
         )
-        self.display_transcript()
-        self.display_control_feedback()
 
+        prompt = f"""
+        [CONTEXT]
+          You are the workshop facilitator!
+          Here are the workshop details: {self.global_config}
+          Here is the transcript so far: {self.transcript_content}
+        [/CONTEXT]
+        [INSTRUCTIONS]
+          Review the transcript and the goals.
+          Use your skill to ask open-ended questions to keep the conversation flow going.
+        [/INSTRUCTIONS]
+        """
+
+        response = self.facilitator.generate_response(
+            self.llm, self.global_config, self.transcript_content, prompt=prompt
+        )
+        self.transcript_content.append(f"{self.facilitator.name} (F): {response}")
+        self.control_feedback.append(
+            f"{self.facilitator.name} (F) has spoken. Use /next to continue."
+        )
 
     def take_participant_turn(self, participant=None):
+        """ Take the participant turn """
         if participant is None:
             return
 
         self.previous_participant = participant
         self.current_turn += 1
         participant.update_stats(self.current_turn)
-        
-        participant_response = participant.generate_response(self.llm, self.global_config, self.transcript_content)
+
+        participant_response = participant.generate_response(
+            self.llm, self.global_config, self.transcript_content
+        )
 
         self.transcript_content.append(f"{participant.name}: {participant_response}")
         self.control_feedback.append(
             f"{participant.name} has spoken. Use /next to continue."
         )
-        self.display_transcript()
-        self.display_control_feedback()
 
     def display_transcript(self):
+        """ Display the transcript """
         console.clear()
         console.print("[bold green]Transcript:[/bold green]")
         for line in self.transcript_content[-20:]:
@@ -369,15 +449,17 @@ class Workshop:
                 rprint(f"[bold blue]{parts[0]}[/bold blue]: {parts[1]}")
             else:
                 console.print(line)
-        with open("latest_transcript.txt", "w") as f:
+        with open("latest_transcript.txt", "w", encoding="utf-8") as f:
             f.write("\n".join(self.transcript_content))
 
     def display_control_feedback(self):
+        """ Display the control feedback """
         console.print("\n[bold red]Control Messages:[/bold red]")
         for line in self.control_feedback[-5:]:
             console.print(line)
 
     def handle_util_command(self, args):
+        """ Handle commands """
         if not args:
             self.control_feedback.append("Usage: /util [action] [parameters]")
             return
@@ -397,7 +479,10 @@ class Workshop:
                 {self.transcript_content}
               [/CONTENT]
               """
-            response = self.llm_client.get_response(prompt=prompt, system_message=f"You are a summarizer, you compress text.")
+            response = self.llm.get_response(
+                prompt=prompt,
+                system_message=f"You are a summarizer, you compress text.",
+            )
             summary = response["message"]["content"]
             with open("summary.txt", "w") as f:
                 f.write(summary)
@@ -406,23 +491,35 @@ class Workshop:
 
 
 def main(arg):
-    LLM = LLMInterface(client=Client(host="http://localhost:11434"), model="mistral:latest")
-    workshop = Workshop(
-        llm_client=LLM
+    """ main function to run the workshop """
+    llm = LLMInterface(
+        client=Client(host="http://localhost:11434"), model="mistral:latest"
     )
-    if len(sys.argv) > 1:
-        rprint(f"Loading configuration file {sys.argv[0]}")
-        workshop.handle_load_command([sys.argv[1]])
-    while True:
+    workshop = Workshop(llm_client=llm)
+    rprint(workshop.get_state())
+
+    if arg and arg.endswith(".json"):
+        workshop.load_state(arg)
+        print(f"Loaded workshop state from {arg}")
+    elif arg:
+        print(f"Loading configuration file {arg}")
+        workshop.handle_load_command([arg])
+
+    ## Main Turn Loop
+    while workshop.get_state() != WorkshopState.ENDING:
         try:
             workshop.display_transcript()
             workshop.display_control_feedback()
-
             command = Prompt.ask("\n>>>")
-
             workshop.handle_command(command)
         except KeyboardInterrupt:
-            break
+            workshop.handle_command("/exit")
+
+    workshop.save_state("final_state.json")
+    print("Workshop ended. Final state saved.")
+
+    workshop.save_state("final_state.json")  # Save final state when exiting
+    print("Workshop ended. Final state saved.")
 
 
 if __name__ == "__main__":
