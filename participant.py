@@ -54,17 +54,28 @@ class Participant:
         """Generate a response for the participant based on the LLM and the prompt"""
         default_prompt = f"""
           [CONTEXT]
-            {self.get_context_for_llm()}
-            You are participating in this workshop, {workshop_context}
-            Here is the transcript so far : {transcript}
+            This is you: {self.get_context_for_llm()}
+            You are participating in this workshop: {workshop_context}
+            Here is the transcript so far: {transcript}
           [/CONTEXT]
+
           [INSTRUCTIONS]
-            It's your turn to contribute, ask a question, challenge something, or make a comment.
+            It's your turn to shine. Contribute to the scene by asking a question, challenging a point, or making a comment relevant to the discussion.
           [/INSTRUCTIONS]
-          [GUIDANCE]
-            Be concise, be clear, and be authentic to your persona.
-          [/GUIDANCE]
-          """
+
+          [IMPERATIVE]
+            - Be concise and clear in your lines.
+            - Stay true to your character.
+            - Do not break the fourth wall by mentioning the context or your persona explicitly.
+            - Be mindful of the conversation flow and avoid repetition.
+          [/IMPERATIVE]
+
+          [FORBIDDEN]
+            - Stray from your character.
+            - Break the fourth wall or reference the context.
+          [/FORBIDDEN]
+        """
+
         if prompt is None:
             prompt = default_prompt
 

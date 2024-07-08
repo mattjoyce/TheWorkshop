@@ -13,7 +13,7 @@ from rich import print as rprint
 from rich.console import Console
 from rich.pretty import Pretty
 from rich.prompt import Prompt
-
+from rich.progress import Progress
 from llm_interface import LLMInterface
 from participant import Participant
 from dataclasses import dataclass
@@ -24,11 +24,12 @@ class TranscriptEntry:
     round: int
     turn: int
     participant_uuid: str
+    participant_name: str
     content: str
 
     
     def __str__(self):
-        return f"{self.round}:{self.turn}:{self.participant_uuid}:{self.content}"
+        return f"{self.participant_name} : {self.content}"
 
 console = Console()
 
@@ -45,7 +46,7 @@ class Workshop:
     """ Main class for the workshop """
     def __init__(self, llm_client, context_length=4000):
         self.llm = llm_client
-        self.transcript_content: List[TranscriptEntry] = []
+        self.transcript_entries: List[TranscriptEntry] = []
         self.control_feedback: List[str] = []
         self.global_config: Dict[str, Any] = {}
         self.participants: List[Participant] = []
@@ -65,7 +66,7 @@ class Workshop:
         Returns:
             List[str]: The full transcript.
         """
-        return [str(entry) for entry in self.transcript_content]
+        return [str(entry) for entry in self.transcript_entries]
     
     def get_participant_by_uuid(self, uuid):
         for participant in self.participants:
@@ -80,7 +81,7 @@ class Workshop:
     def save_state(self, filename: str = "workshop_state.json"):
         """ Save the state to JSON, in a restartable format """
         state = {
-            "transcript_content": [asdict(t) for t in self.transcript_content],
+            "transcript_content": [asdict(t) for t in self.transcript_entries],
             "control_feedback": self.control_feedback,
             "global_config": self.global_config,
             "participants": [asdict(p) for p in self.participants],
@@ -103,7 +104,7 @@ class Workshop:
         with open(filename, "r", encoding="utf-8") as f:
             state = json.load(f)
 
-        self.transcript_content = [TranscriptEntry(**t) for t in state["transcript_content"]]
+        self.transcript_entries = [TranscriptEntry(**t) for t in state["transcript_content"]]
         self.control_feedback = state["control_feedback"]
         self.global_config = state["global_config"]
         self.participants = [Participant(**p) for p in state["participants"]]
@@ -452,12 +453,14 @@ class Workshop:
         [/INSTRUCTIONS]
         """
 
-        response, tokens = self.facilitator.generate_response(
-            self.llm, self.global_config, self.get_transcript(), prompt=prompt,
-        )
+        with console.status(f"{self.facilitator.name} ({self.facilitator.role}) thinking", spinner="dots") as status:
+            response, tokens = self.facilitator.generate_response(
+                self.llm, self.global_config, self.get_transcript(), prompt=prompt,
+            )
 
-        entry=TranscriptEntry(round=self.current_round,turn=self.current_turn,participant_uuid=self.facilitator.uuid,content=response)
-        self.transcript_content.append(entry)
+
+        entry=TranscriptEntry(self.current_round,self.current_turn,self.facilitator.uuid,self.facilitator.name,content=response)
+        self.transcript_entries.append(entry)
         self.control_feedback.append(
             f"{self.facilitator.name} (F) has spoken. Use /next to continue."
         )
@@ -472,10 +475,11 @@ class Workshop:
         self.current_turn += 1
         participant.update_stats(self.current_turn)
 
-        participant_response, tokens = participant.generate_response(llm=self.llm, workshop_context=self.global_config, transcript=self.get_transcript(), prompt=None)
+        with console.status(f"{participant.name} ({participant.role}) thinking", spinner="dots") as status:
+            participant_response, tokens = participant.generate_response(llm=self.llm, workshop_context=self.global_config, transcript=self.get_transcript(), prompt=None)
         
-        entry=TranscriptEntry(round=self.current_round,turn=self.current_turn,participant_uuid=participant.uuid,content=participant_response)
-        self.transcript_content.append(entry)
+        entry=TranscriptEntry(self.current_round,self.current_turn,participant.uuid,participant.name,participant_response)
+        self.transcript_entries.append(entry)
 
         self.control_feedback.append(
             f"{participant.name} has spoken. Use /next to continue."
@@ -486,9 +490,9 @@ class Workshop:
         """ Display the transcript """
         console.clear()
         console.print("[bold green]Transcript:[/bold green]")
-        for entry in self.transcript_content[-20:]:
+        for entry in self.transcript_entries[-20:]:
             participant=self.get_participant_by_uuid(entry.participant_uuid)
-            rprint(f"[blue]{entry.round}.{entry.round}[/blue][bold blue]{entry.participant_uuid}[/bold blue]: {entry.content}")
+            rprint(f"[blue]{entry.round}.{entry.turn}[/blue][bold blue]{entry.participant_name}[/bold blue] {entry.content}")
 
         with open("latest_transcript.txt", "w", encoding="utf-8") as f:
             f.write("\n".join(self.get_transcript()))
