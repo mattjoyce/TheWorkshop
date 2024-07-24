@@ -23,7 +23,6 @@ from dataclasses import dataclass
 class TranscriptEntry:
     round: int
     turn: int
-    participant_uuid: str
     participant_name: str
     content: str
 
@@ -59,20 +58,23 @@ class Workshop:
         self.context_length : int = context_length
         self.current_round : int= 0
         
-    def get_transcript(self) -> List[str]:
-        """
-        Retrieves the full transcript as a list of strings.
-
-        Returns:
-            List[str]: The full transcript.
-        """
-        return [str(entry) for entry in self.transcript_entries]
     
-    def get_participant_by_uuid(self, uuid):
-        for participant in self.participants:
-            if participant.uuid == uuid:
-                return participant
-        return None
+    def get_transcript(self) -> str:
+        """
+        Retrieves the full transcript as a JSON payload.
+        Returns:
+            str: The full transcript as a JSON string.
+        """
+        transcript_data = [
+            {
+                "round": entry.round,
+                "turn": entry.turn,
+                "participant": entry.participant_name,
+                "content": entry.content
+            }
+            for entry in self.transcript_entries
+        ]
+        return json.dumps(transcript_data, indent=2)
 
     def get_state(self) -> WorkshopState:
         """ Getter for the workshop state """
@@ -243,17 +245,21 @@ class Workshop:
         """ Handle commands """
         if len(args) == 1:
             filename = args[0]
+            if filename == "last":
+                filename = "final_state.json"
             try:
                 self.load_state(filename)
                 self.control_feedback.append(
                     f"Workshop state loaded from '{filename}'."
+                    
                 )
+                self.state=WorkshopState.STARTED
             except Exception as e:
                 self.control_feedback.append(
                     f"Error loading workshop state from '{filename}': {e}"
                 )
         else:
-            self.control_feedback.append("Usage: /load [filename]")
+            self.control_feedback.append("Usage: /restore [filename]")
 
     def handle_load_command(self, args):
         """ Handle commands """
@@ -327,7 +333,8 @@ class Workshop:
                 Say this '{content}' in your voice.
               [/INSTRUCTIONS]
               [GUIDANCE]
-                Be concise, be clear, and be authentic to your persona.
+                Be sure to share the message with the participants.
+                Do not alter the core message, only add character to it.
               [/GUIDANCE]
             """
             self.take_facilitator_turn(prompt)
@@ -459,7 +466,7 @@ class Workshop:
             )
 
 
-        entry=TranscriptEntry(self.current_round,self.current_turn,self.facilitator.uuid,self.facilitator.name,content=response)
+        entry=TranscriptEntry(self.current_round,self.current_turn,self.facilitator.name,content=response)
         self.transcript_entries.append(entry)
         self.control_feedback.append(
             f"{self.facilitator.name} (F) has spoken. Use /next to continue."
@@ -478,7 +485,7 @@ class Workshop:
         with console.status(f"{participant.name} ({participant.role}) thinking", spinner="dots") as status:
             participant_response, tokens = participant.generate_response(llm=self.llm, workshop_context=self.global_config, transcript=self.get_transcript(), prompt=None)
         
-        entry=TranscriptEntry(self.current_round,self.current_turn,participant.uuid,participant.name,participant_response)
+        entry=TranscriptEntry(self.current_round,self.current_turn,participant.name,participant_response)
         self.transcript_entries.append(entry)
 
         self.control_feedback.append(
@@ -491,7 +498,6 @@ class Workshop:
         console.clear()
         console.print("[bold green]Transcript:[/bold green]")
         for entry in self.transcript_entries[-20:]:
-            participant=self.get_participant_by_uuid(entry.participant_uuid)
             rprint(f"[blue]{entry.round}.{entry.turn}[/blue][bold blue]{entry.participant_name}[/bold blue] {entry.content}")
 
         with open("latest_transcript.txt", "w", encoding="utf-8") as f:
@@ -537,7 +543,7 @@ class Workshop:
 
 def main(arg):
     """ main function to run the workshop """
-    model="phi3:latest"
+    model="mistral:latest"
 
     llm = LLMInterface(
         client=Client(host="http://localhost:11434"), model=model

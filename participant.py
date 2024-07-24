@@ -2,6 +2,7 @@
 from dataclasses import dataclass, field
 from llm_interface import LLMInterface
 import uuid
+import json
 
 @dataclass
 class Participant:
@@ -63,17 +64,17 @@ class Participant:
             It's your turn to shine. Contribute to the scene by asking a question, challenging a point, or making a comment relevant to the discussion.
           [/INSTRUCTIONS]
 
-          [IMPERATIVE]
-            - Be concise and clear in your lines.
-            - Stay true to your character.
-            - Do not break the fourth wall by mentioning the context or your persona explicitly.
-            - Be mindful of the conversation flow and avoid repetition.
-          [/IMPERATIVE]
+          [GUIDENCE]
+            - Always be concise and clear in your lines.
+            - Always stay true to your character.
+            - Always be mindful of the conversation 
+            - Always speak in the first person.
+            - Never break the fourth wall by mentioning the context or your persona explicitly.
+            - Never Stray from your character.
+            - Never Impersonate another participant.
+            - Never share more than one contribution.
+          [/GUIDENCE]
 
-          [FORBIDDEN]
-            - Stray from your character.
-            - Break the fourth wall or reference the context.
-          [/FORBIDDEN]
         """
 
         if prompt is None:
@@ -84,4 +85,51 @@ class Participant:
           f.write(
               f"Participant: {self.name}\nPrompt: {prompt}\nResponse: {response}"
           )
+
+        check=self.check_reponse(llm, response, self.name)
+        if check:
+            response = f"PASS: {response}"
+        else:
+            response = f"FAIL: {response}"
+
+
         return response, tokens
+    
+    def check_reponse(self, llm: LLMInterface, response: str, name: str) -> bool:
+        """Check if the response is relevant to the prompt"""
+        # use llm to chgeck the previous response is compliant with the prompt
+        prompt = f"""We have recived a response from {name}, a workshop participate.
+        Here's the guidence we provided.
+          [GUIDENCE]
+            - Always be concise and clear in your lines.
+            - Always stay true to your character.
+            - Always be mindful of the conversation 
+            - Always speak in the first person.
+            - Never break the fourth wall by mentioning the context or your persona explicitly.
+            - Never Stray from your character.
+            - Never Impersonate another participant.
+            - Never share more than one contribution.
+          [/GUIDENCE]
+        
+        
+        Heres' the response:
+        [RESPONSE]
+        {response}
+        [/RESPONSE]
+
+        You your task is do judge the response.
+        [TASK format=json]
+                If the response violates guidance, prefix you judgement with FAIL.
+                If the response is in compliance, prefix you judgement with PASS.
+        [/TASK]
+        """
+
+        response, tokens = llm.get_response(prompt, system_message=f"You are a checker bot.",get_tokens=True)
+        print("Checking")
+        with open(f"state/checker_reponse.txt", "a") as f:
+            f.write(json.dumps({"prompt": prompt, "response": response, "tokens": tokens}, indent=4))
+
+        if response.lstrip().lower()[:4] == "pass":
+            return True
+        else:
+            return False

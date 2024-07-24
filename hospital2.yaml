@@ -71,11 +71,17 @@ context:
     size: "Large"
     location: "Australia"
   strategic_objectives:
-    - "Improve patient satisfaction scores by 15% within 12 months"
-    - "Reduce average emergency room wait times by 25% in the next 6 months"
+    - "Grow market share by improving clinician satisfaction scores by 15% within 12 months"
+    - "Reduce reliance on agency-based care by 25% in the next 6 months"
+    - "Redirect nurse minutes to direct care by reducing administrative burdens by 15% in the next 6 months"
+    - "Increase revenue through optimising Revenue Cycle by 15% in the next 6 months"
+
   industry_trends:
     - "Increasing focus on telemedicine"
     - "Rising healthcare costs"
+    - "Specialist rostering optimisation"
+    - "Predictive analytics for patient outcomes"
+
   challenges:
     - "Staff burnout and shortages"
     - "Adapting to new technologies"
@@ -87,3 +93,17 @@ tools:
     description: "How might we?"
   - name: "WIF"
     description: "What if we?"
+  - name: "5WHYS"
+    description: "Recursively ask the whys"
+  - name: "Reverse Imaging"
+    description: "It's 1 year from now, we have been successful, what do we see?"
+  - name: "Theory of Change"
+    description: "What if we change our current system?"
+  - name: "Theory of Constraints"
+    description: "What if we remove our current constraints?"
+  - name: "Theory of Opportunity"
+    description: "What if we create new opportunities?"
+  - name: "Theory of Value"
+    description: "What if we create new value?"
+  - name: "Theory of Growth"
+    description: "What if we grow?"
